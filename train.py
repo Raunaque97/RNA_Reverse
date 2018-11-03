@@ -1,5 +1,4 @@
 import numpy as np
-from multiprocessing.dummy import Pool
 import rnalib as rnalib
 import random
 import RNA
@@ -58,15 +57,36 @@ def TestPolicy(policy):
 	# print(env.terminated)
 	while not env.terminated:
 		a = array2actionTuple(policy.get_action(np.expand_dims(env.state.T, axis=0)))
-		print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t policy = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
+		print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t policy Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
 		reward = env.step(a)
 
-	pass
+
+def TestTabularPolicy(policy):
+	structure = random.choice(list(train_dict.keys()))
+	objectiveSeq = train_dict[structure][0]
+	N = len(objectiveSeq)
+	env = rnalib.RNAEnvironment(goal = structure, max_steps = 1000)
+	# optimum_actions = getBestActions(env.sequence, objectiveSeq)
+	# print(env.terminated)
+	while not env.terminated:
+		a = epsilonGreedyAction(env.state, policy, epsilon = 0.0)
+		prevState = env.state
+		r = env.step(a)
+		print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t policy Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
+		if r == 1:
+			print('Success')
+		flag = 0
+		while (env.state == prevState).all() and not env.terminated:
+			a = epsilonGreedyAction(env.state, policy, epsilon = 1.0)
+			r = env.step(a)
+			flag = 1
+		if flag == 1:
+			print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t random Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
 
 def generate_train_set():
 	seq_dict = {}
-	length = 10
-	for i in range(1000):
+	length = 8
+	for i in range(10000):
 		random_seq = [random.randint(0,3) for i in range(length)]
 		structure, energy = RNA.fold(rnalib.sequence_to_string(random_seq))
 
@@ -77,13 +97,86 @@ def generate_train_set():
 	return seq_dict
 
 
+
+
+
+def list_to_tuple(l):
+	if type(l) == np.ndarray:
+		l = l.tolist()
+	t = ()
+	if type(l) == list:
+		if type(l[0]) != list:
+			return tuple(l)
+		for i in l:
+			t = t + (list_to_tuple(i),)
+		return t
+
+def epsilonGreedyAction(st, policy, epsilon = 0.1):
+	all_actns = []
+	for i in range(N):
+		for b in range(4):
+			all_actns.append((i,b))
+
+	for a in all_actns:
+		if (list_to_tuple(st),a) not in policy:
+			policy[(list_to_tuple(st),a)] = 0.0
+
+	if random.random() < epsilon:
+		return (random.randint(0,N-1),random.randint(0,3))
+	else:
+		# find best action
+		best_act = None
+		maxV = -float('inf')
+		for a in all_actns:
+			if policy[(list_to_tuple(st),a)] > maxV:
+				best_act, maxV = a, policy[(list_to_tuple(st),a)]
+		return best_act
+
+
+
 train_dict = generate_train_set()
 structure = random.choice(list(train_dict.keys()))
 print(structure)
 print(train_dict.keys())
 
-policy = rnalib.RNAPolicy()
+# policy = rnalib.RNAPolicy()
+policy = {}
 
-TestPolicy(policy)
-train_supervised(policy)
-TestPolicy(policy)
+alpha = 0.5
+gamma = 1.0
+numEpisodes = 50
+
+
+
+for _ in range(numEpisodes):
+	structure = random.choice(list(train_dict.keys()))
+	N = len(structure)
+	env = rnalib.RNAEnvironment(goal = structure, max_steps = 10000)
+
+	exp_replay = []
+	S = env.state
+	a = epsilonGreedyAction(S, policy, epsilon= 0.6)  
+	while not env.terminated:
+		r = env.step(a)
+		# if r == 1:
+		# 	print('reward = 1 on  train')
+		Sprime = env.state
+		aprime = epsilonGreedyAction(Sprime, policy, epsilon= 0.6)
+
+		exp_replay.append((S,a,r,Sprime,aprime))
+		S = Sprime
+		a = aprime
+
+	for j in range(10):
+		for (S,a,r,Sprime,aprime) in exp_replay:
+			policy[(list_to_tuple(S),a)] = policy[(list_to_tuple(S),a)] + alpha*(r + gamma*policy[(list_to_tuple(Sprime),aprime)] - policy[(list_to_tuple(S),a)])
+# print(policy)
+TestTabularPolicy(policy)
+
+
+
+
+
+# TestPolicy(policy)
+# train_supervised(policy)
+# TestPolicy(policy)

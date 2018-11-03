@@ -56,10 +56,16 @@ class RNAEnvironment():
         self.count = 0
         self.terminated = False
 
-        self.sequence = [random.randint(0, 3) for i in range(self.length)]      # [0-3]*
+                
         self.goal = goal                                 # bracket struct
         self.target_bonds = bracket_to_bonds(self.goal)
         self.state = None
+        self.sequence = [random.randint(0, 3) for i in range(self.length)]      # [0-3]*
+        while True:
+            self.sequence = [random.randint(0, 3) for i in range(self.length)]
+            self.update_state()
+            if not self.terminated:
+                break
         RNAEnvironment.update_state(self)
 
     def step(self, action): # action tuple
