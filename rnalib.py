@@ -154,7 +154,7 @@ class RNAPolicy(nn.Module):
         x = sigmoid(self.conv3(x))
         return x
 
-def update(best_action, model, environment):
+def update(S,A,R,SPrime,APrime, model, environment):
     optimizer = optim.Adam(model.parameters(), lr=0.0001)  
     optimizer.zero_grad()
     
@@ -166,3 +166,25 @@ def update(best_action, model, environment):
     
     loss.backward()
     optimizer.step()
+
+def updateParam(batch, model, lr = 0.001):
+    optimizer = optim.Adam(model.parameters(), lr=lr) 
+    optimizer.zero_grad()
+    N = batch[0][0].shape[0] #length of RNA
+    states = np.zeros((len(batch),7,N))
+    for i in range(len(batch)):
+        states[i] = batch[i][0].T
+
+    Q = model(states)
+    loss = torch.FloatTensor([0])
+    for i in range(len(batch)):
+        (S,a,Y,Sprime) = batch[i]
+        loss = loss + ((torch.FloatTensor([Y]) - Q[i, a[1], a[0]])**2)
+        # loss += Q[i, a[1], a[0]]
+
+    loss = loss/len(batch)
+
+    loss.backward()
+    optimizer.step()
+
+    return loss.detach().numpy()[0]
