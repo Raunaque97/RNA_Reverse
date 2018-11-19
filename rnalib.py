@@ -72,7 +72,7 @@ class RNAEnvironment():
         """Perform one action on the environment."""
         index, base = action
         self.count += 1
-        reward = 0
+        reward = -1
         if self.count == self.max_steps:
             self.terminated = True # Give up.
             return reward
@@ -86,12 +86,13 @@ class RNAEnvironment():
                 if self.sequence[pair_index] not in pairs[base]:
                     self.sequence[pair_index] = pairs[base][0]
             self.update_state()
-            reward = 1 if self.terminated else 0
+            reward = 1 if self.terminated else -1 #########
         return reward
 
     def reset(self):
         """Reset the environment and begin a new episode."""
         self.count = 0
+        self.terminated = False
         while True:
             self.sequence = [random.randint(0, 3) for i in range(self.length)]
             self.update_state()
