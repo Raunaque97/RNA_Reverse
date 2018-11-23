@@ -3,6 +3,9 @@ import rnalib as rnalib
 import random
 import RNA
 import sys
+import os
+import torch
+import pickle as pkl
 
 def getBestActions(init_seq, final_seq):
     ret = []
@@ -19,7 +22,14 @@ def actionTuple2Array(rna_length,a):
 def array2actionTuple(a):
     idx = np.argmax(np.max(a,1))
     base = np.argmax(a[idx])
-    return (idx, base)
+
+    base_list = []
+    for i in range(a.shape[0]):
+        for b in range(4):
+            if a[i,b] == a[idx,base]:
+                base_list.append((i,b))
+
+    return random.choice(base_list)
 
 def train_supervised(policy):
     step = 50000
@@ -48,11 +58,12 @@ def train_supervised(policy):
                 print('train_action = '+str(a_tup)+'\t policy = '+str(a))
 
 def train_DQN(policy):
-    numEpisodes = 100
-    epsilon = 0.2
-    miniBatchSz = 128
-    alpha = 0.05
+    numEpisodes = 50
+    epsilon = 0.3
+    miniBatchSz = 50
+    alpha = 0.3
     gamma = 1.0
+    frac = 0.3
     policy.train()
 
     for e in range(numEpisodes):
@@ -61,31 +72,38 @@ def train_DQN(policy):
         env = rnalib.RNAEnvironment(goal = structure, max_steps = 10000)
 
         exp_replay = []
-
-        while len(exp_replay) <= 1000:
+        print('STRUCTURE: '+structure)
+        num_success = 0
+        while len(exp_replay) <= 500 or num_success <= miniBatchSz*frac:
             S = env.state
             a = epsilonGreedyActionDQN(S, policy, epsilon= epsilon) #actionTuple 
             while not env.terminated:
                 r = env.step(a)
                 Sprime = env.state
-                aprime = epsilonGreedyActionDQN(Sprime, policy, epsilon= 1.0)
+                aprime = epsilonGreedyActionDQN(Sprime, policy, epsilon= epsilon)
                 Y = r if env.terminated else r + gamma*np.max(policy.get_action(np.expand_dims(Sprime.T, axis=0)))
                 
-                if r == 1:
+                if env.terminated:
                     # print('reward = 1 on DQNtrain')
                     exp_replay.append((S,a,Y,None))
+                    num_success += 1
                     break
                 exp_replay.append((S,a,Y,Sprime))
 
                 S = Sprime
                 a = aprime
             env.reset()
-            # print('##################### env reset exp_replay len = ' + str(len(exp_replay)))
-        # if True:
-        #     for (_,a,y,Sprime) in exp_replay[:10]:
-        #         print(a,y,(Sprime is None))
-        #     print('---------')
-        #     print(policy.get_action(np.expand_dims(exp_replay[0][0].T, axis=0)))
+            print('##################### env reset exp_replay len = ' + str(len(exp_replay))+' num_success'+str(num_success))
+        if True:
+            print('---------')
+            for (_,a,y,Sprime) in exp_replay[:5]:
+                print(a,y,(Sprime is None))
+            tempS = None
+            for (tempS,a,y,Sprime) in [e for e in exp_replay if e[-1] is None][:5]:
+                print(a,y,(Sprime is None))
+            print(policy.get_action(np.expand_dims(tempS.T, axis=0)))
+            print(policy.get_action(np.expand_dims(random.choice(exp_replay)[0].T, axis=0)))
+
         #     # exit()
 
 
@@ -95,12 +113,15 @@ def train_DQN(policy):
         #     if p.requires_grad:
         #         print(p.name, p.data)
         #         break
-        for j in range(2000):
-            miniBatch = random.sample(exp_replay, miniBatchSz)
+        for j in range(1000):
+            ## force x% of minibatch to be terminal states
+            miniBatch = random.sample(exp_replay, int(miniBatchSz*(1-frac)))
+            miniBatch += random.sample([e for e in exp_replay if e[-1] is None], int(miniBatchSz*frac))
+            # print(miniBatch)
             losses.append(rnalib.updateParam(miniBatch,model = policy, lr = alpha))
 
 
-            if j%250 == 0:
+            if j%100 == 0:
                 print(losses[-1])
         # print(losses[0:10000:50])
         
@@ -111,21 +132,25 @@ def train_DQN(policy):
 
 
 
-def TestPolicy(policy):
+def TestPolicy(policy, max_steps = 500, showStat = True):
     structure = random.choice(list(train_dict.keys()))
     objectiveSeq = train_dict[structure][0]
     N = len(objectiveSeq)
-    env = rnalib.RNAEnvironment(goal = structure, max_steps = 50)
+    env = rnalib.RNAEnvironment(goal = structure, max_steps = max_steps)
     # optimum_actions = getBestActions(env.sequence, objectiveSeq)
     # print(env.terminated)
-    print('objective structure: '+structure)
+    if showStat:
+        print('objective structure: '+structure)
     while not env.terminated:
         a = array2actionTuple(policy.get_action(np.expand_dims(env.state.T, axis=0)))
         prevState = env.state
         r = env.step(a)
-        print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t policy Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
-        if r == 1:
-            print('***SUCCESS***')
+        if showStat:
+            print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t policy Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
+        if r == 5:
+            if showStat:
+                print('***SUCCESS***')
+            return env.count
             break
         flag = 0
         while (env.state == prevState).all() and not env.terminated:
@@ -133,61 +158,74 @@ def TestPolicy(policy):
             r = env.step(a)
             flag = 1
         if flag == 1:
-            print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t RANDOM Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
-        if r == 1:
-            print('***SUCCESS***')
-
-def TestRandomPolicy():
+            if showStat:
+                print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t RANDOM Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
+        if r == 5:
+            if showStat:
+                print('***SUCCESS***')
+            return env.count
+    return -1
+def TestRandomPolicy(max_steps = 500, showStat = True):
     structure = random.choice(list(train_dict.keys()))
     objectiveSeq = train_dict[structure][0]
     N = len(objectiveSeq)
-    env = rnalib.RNAEnvironment(goal = structure, max_steps = 10000)
+    env = rnalib.RNAEnvironment(goal = structure, max_steps = max_steps)
 
+    max_step = 10e4
     steps = 0
-    while not env.terminated:
+    while not env.terminated and steps < max_step:
         a = (random.randint(0,N-1),random.randint(0,3))
         r = env.step(a)
         steps += 1
 
+    if steps == max_steps:
+        return -1
     return steps
-
-
-def TestTabularPolicy(policy):
+def TestTabularPolicy(policy, max_steps = 500, showStat = True):
     structure = random.choice(list(train_dict.keys()))
     objectiveSeq = train_dict[structure][0]
     N = len(objectiveSeq)
     env = rnalib.RNAEnvironment(goal = structure, max_steps = 100)
     # optimum_actions = getBestActions(env.sequence, objectiveSeq)
     # print(env.terminated)
-    print('objective structure: '+structure)
+    if showStat:    
+        print('objective structure: '+structure)
     while not env.terminated:
         a = epsilonGreedyAction(env.state, policy, epsilon = 0.0)
         prevState = env.state
         r = env.step(a)
-        print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t policy Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
+        if showStat:    
+            print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t policy Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
         if r == 1:
-            print('Success')
+            if showStat:    
+                print('Success')
         flag = 0
         while (env.state == prevState).all() and not env.terminated:
             a = epsilonGreedyAction(env.state, policy, epsilon = 1.0)
             r = env.step(a)
             flag = 1
         if flag == 1:
-            print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t RANDOM Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
+            if showStat:    
+                print('step: '+str(env.count)+'\tseq = '+str(env.sequence)+'\t RANDOM Actn = '+str(a)+'\t objSeQ: '+str(objectiveSeq))
         if r == 1:
-            print('***SUCCESS***')
-def generate_train_set():
-    seq_dict = {}
-    length = 9
-    for i in range(500):
-        random_seq = [random.randint(0,3) for i in range(length)]
-        structure, energy = RNA.fold(rnalib.sequence_to_string(random_seq))
-
-        if structure not in seq_dict:
-            seq_dict[structure] = [random_seq]
-        else:
-            seq_dict[structure].append(random_seq)
-    return seq_dict
+            if showStat:    
+                print('***SUCCESS***')
+            return env.count
+def generate_train_set(length = 10):
+    if os.path.isfile('train_dict_{}.pkl'.format(length)):
+        return pkl.load(open('train_dict_{}.pkl'.format(length),'rb'))
+    else:   
+        seq_dict = {}
+        for i in range(500):
+            random_seq = [random.randint(0,3) for i in range(length)]
+            structure, energy = RNA.fold(rnalib.sequence_to_string(random_seq))
+            if structure not in seq_dict:
+                seq_dict[structure] = [random_seq]
+            else:
+                seq_dict[structure].append(random_seq)
+        with open("train_dict_{}.pkl".format(length), "wb") as f:
+            pkl.dump(seq_dict, f)
+        return seq_dict
 
 def list_to_tuple(l):
     if type(l) == np.ndarray:
@@ -233,20 +271,33 @@ def epsilonGreedyAction(st, policy, epsilon = 0.1):
 
 
 
-train_dict = generate_train_set()
+train_dict = generate_train_set(20)
+
 structure = random.choice(list(train_dict.keys()))
-print(structure)
 print(train_dict.keys())
+print(structure)
 
-# policy = rnalib.RNAPolicy()
+policy = rnalib.RNA_BiLSTM_Policy(hidden_size= 15, num_layers= 4)
 # TestPolicy(policy)
+policy = torch.load('DQN_policy')
 # train_DQN(policy)
-# TestPolicy(policy)
-# TestPolicy(policy)
-# TestPolicy(policy)
+# torch.save(policy, 'DQN_policy')
+# policy = torch.load('DQN_policy')
 
-TestRandomPolicy()
 
+# TestPolicy(policy, max_steps = 50)
+# TestPolicy(policy, max_steps = 50)
+# TestPolicy(policy, max_steps = 50)
+# TestPolicy(policy, max_steps = 50)
+# TestPolicy(policy, max_steps = 50)
+# TestPolicy(policy, max_steps = 50)
+
+ss = []
+for i in range(50):
+    print(i)
+    ss.append(TestPolicy(policy, max_steps = 10000, showStat = False))
+
+print(ss)
 ##########################################
 # policy = {}
 
@@ -282,9 +333,10 @@ TestRandomPolicy()
 #   if sys.getsizeof(policy) > maxPolicySize:
 #       break
 # # print(policy)
-# TestTabularPolicy(policy)
-# TestTabularPolicy(policy)
-# TestTabularPolicy(policy)
+# s = []
+# for _ in range(100):
+#     s.append(TestTabularPolicy(policy))
+
 ##########################################
 
 

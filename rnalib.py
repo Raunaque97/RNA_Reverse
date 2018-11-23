@@ -72,10 +72,10 @@ class RNAEnvironment():
         """Perform one action on the environment."""
         index, base = action
         self.count += 1
-        reward = -1
+        reward = -2
         if self.count == self.max_steps:
             self.terminated = True # Give up.
-            return reward
+            return 0
         if self.sequence[index] == base:
             # This action doesn't change anything.
             return reward
@@ -86,7 +86,7 @@ class RNAEnvironment():
                 if self.sequence[pair_index] not in pairs[base]:
                     self.sequence[pair_index] = pairs[base][0]
             self.update_state()
-            reward = 1 if self.terminated else -1 #########
+            reward = 5 if self.terminated else -1 #########
         return reward
 
     def reset(self):
@@ -112,13 +112,13 @@ class RNAEnvironment():
         state[np.arange(self.length), self.sequence] = 1
 
         for i in range(self.length):
-            if current_bonds[i] is not None and self.target_bonds[i] is not None:
+            if current_bonds[i] is not None and self.target_bonds[i] is not None: 
                 state[i,4] = (current_bonds[i] - self.target_bonds[i])/self.length
                 state[i,5] = 0
                 state[i,6] = 0
             elif current_bonds[i] is not None and self.target_bonds[i] is None:
-                state[i,4] = 1
-                state[i,5] = 0
+                state[i,4] = 1  # 0: ok 1:problem
+                state[i,5] = 0  # 0: conrrently bonded
                 state[i,6] = 1
             elif current_bonds[i] is None and self.target_bonds[i] is not None:
                 state[i,4] = 1
@@ -133,29 +133,56 @@ class RNAEnvironment():
 
 class RNAPolicy(nn.Module):
     """This class implements the policy network."""
-
     def __init__(self):
         super(RNAPolicy, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=7, out_channels=5, kernel_size=5,stride=1,padding=2)
-        self.conv2 = nn.Conv1d(in_channels=5, out_channels=10, kernel_size=5,stride=1,padding=2)
-        self.conv3 = nn.Conv1d(in_channels=10, out_channels=4, kernel_size=5,stride=1,padding=2)
-
+        self.conv1 = nn.Conv1d(in_channels=7, out_channels=15, kernel_size=5,stride=1,padding=2)
+        self.conv2 = nn.Conv1d(in_channels=15, out_channels=10, kernel_size=5,stride=1,padding=2)
+        self.conv3 = nn.Conv1d(in_channels=10, out_channels=10, kernel_size=5,stride=1,padding=2)
+        self.conv4 = nn.Conv1d(in_channels=10, out_channels=4, kernel_size=5,stride=1,padding=2)
     def get_action(self, state):
         x = RNAPolicy.forward(self, state)
-        x=x.detach().numpy().reshape(-1,4)
+        x = x.detach().numpy().reshape(-1,4)
         return x
-        # return RNAPolicy.get_action(self, state)
-
     def forward(self, state):
         if type(state) == np.ndarray:
             state = torch.from_numpy(state).float()
         x = F.relu(self.conv1(state))
         x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
         sigmoid = nn.Sigmoid()
-        x = sigmoid(self.conv3(x))
+        x = sigmoid(self.conv4(x))
         return x
 
-def update(S,A,R,SPrime,APrime, model, environment):
+class RNA_BiLSTM_Policy(nn.Module):
+    """This class implements the policy network."""
+    def __init__(self, hidden_size, num_layers):
+        super(RNA_BiLSTM_Policy, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.lstm = nn.LSTM(7, hidden_size, num_layers, batch_first=True, bidirectional=True)
+        self.conv1 = nn.Conv1d(in_channels=2*hidden_size, out_channels=4, kernel_size=3,stride=1,padding=1)
+
+    def get_action(self, state):
+        # state = np.swapaxes(state,1,2)
+        x = RNA_BiLSTM_Policy.forward(self, state)
+        x = x.detach().numpy().reshape(-1,4)
+        return x
+    def forward(self, x):
+        if type(x) == np.ndarray:
+            x = np.swapaxes(x,1,2)
+            x = torch.from_numpy(x).float()
+        # Set initial states
+        h0 = torch.zeros(self.num_layers*2, x.size(0), self.hidden_size) # 2 for bidirection 
+        c0 = torch.zeros(self.num_layers*2, x.size(0), self.hidden_size)
+        # Forward propagate LSTM
+        out, _ = self.lstm(x, (h0, c0))  # out: tensor of shape (batch_size, seq_length, hidden_size*2)
+        # # Decode the hidden state of the last time step
+        # out = self.fc(out[:, -1, :])
+        sigmoid = nn.Sigmoid()
+        x = sigmoid(self.conv1(out.permute(0,2,1)))
+        return x
+
+def update(S,A,R,SPrime,APrime, model, environment):    # Bullsit
     optimizer = optim.Adam(model.parameters(), lr=0.0001)  
     optimizer.zero_grad()
     
