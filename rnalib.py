@@ -131,16 +131,16 @@ class RNAEnvironment():
 
         self.state = state
 
-class RNAPolicy(nn.Module):
+class RNA_CNN_Policy(nn.Module):
     """This class implements the policy network."""
     def __init__(self):
-        super(RNAPolicy, self).__init__()
+        super(RNA_CNN_Policy, self).__init__()
         self.conv1 = nn.Conv1d(in_channels=7, out_channels=15, kernel_size=5,stride=1,padding=2)
         self.conv2 = nn.Conv1d(in_channels=15, out_channels=10, kernel_size=5,stride=1,padding=2)
         self.conv3 = nn.Conv1d(in_channels=10, out_channels=10, kernel_size=5,stride=1,padding=2)
         self.conv4 = nn.Conv1d(in_channels=10, out_channels=4, kernel_size=5,stride=1,padding=2)
     def get_action(self, state):
-        x = RNAPolicy.forward(self, state)
+        x = RNA_CNN_Policy.forward(self, state)
         x = x.detach().numpy().reshape(-1,4)
         return x
     def forward(self, state):

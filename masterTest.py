@@ -34,7 +34,7 @@ def array2actionTuple(a):
 
 
 def DQNPolicy(random_policy=False):
-	couter,total_steps = 0,0
+	counter,total_steps = 0,0
 	for puzzle in output:
 		if puzzle[0] == 'A' or puzzle[0] == 'U' or puzzle[0] == 'G' or puzzle[0] == 'C':
 			structure, _ = RNA.fold(puzzle)
@@ -43,8 +43,9 @@ def DQNPolicy(random_policy=False):
 
 		env = rnalib.RNAEnvironment(goal=structure,max_steps=1000)
 
-		policy = rnalib.RNA_BiLSTM_Policy(hidden_size= 15, num_layers= 4)
-		policy = torch.load('DQN_policy')
+		if not random_policy:
+			policy = rnalib.RNA_BiLSTM_Policy(hidden_size= 15, num_layers= 4)
+			policy = torch.load('DQN_policy')
 
 		# print(len(structure))
 
@@ -73,11 +74,11 @@ def DQNPolicy(random_policy=False):
 	print("TOTAL SOLVED : ",counter, "AVERAGE :", total_steps/100 )
 
 
-print("Testing RANDOM POLICY")
-DQNPolicy(random_policy=True)
-print("\n\n\n\n")
 print("Testing DQN")
 DQNPolicy()
+print("\n\n\n\n")
+print("Testing RANDOM POLICY")
+DQNPolicy(random_policy=True)
 
 
 
